@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">UploadImages</string>
+    <string name="login">Login</string>
+    <string name="sigining">By signing up you have agreed to our</string>
+    <string name="terms">Terms of use &amp; Privacy Policy</string>
+    <string name="error_message">Please Enter username</string>
+    <string name="error_pass">Please Enter password</string>
+    <string name="something_wrong">Somethingwent wrong</string>
+    <string name="progress">Progress :</string>
+    <string name="category">Hero Festival Assessment</string>
+    <string name="no_data">No Data Found</string>
+    <string name="upload">Upload Image</string>
+</resources>
