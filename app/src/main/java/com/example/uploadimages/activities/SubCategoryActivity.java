@@ -1,5 +1,6 @@
 package com.example.uploadimages.activities;
 
+import androidx.lifecycle.ViewModelProvider;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -15,6 +16,8 @@ import com.example.uploadimages.networkUtils.Api;
 import com.example.uploadimages.networkUtils.ApiClient;
 import com.example.uploadimages.networkUtils.ApiConstants;
 import com.example.uploadimages.networkUtils.ServerResponse;
+import com.example.uploadimages.networkUtils.factories.SubCategoryFactory;
+import com.example.uploadimages.networkUtils.viewmodel.SubCategoryViewModel;
 import com.example.uploadimages.responsepojo.SubCategoryPojo;
 import com.example.uploadimages.sessionManager.LoginSessionManager;
 import com.example.uploadimages.utils.AppConstants;
@@ -26,9 +29,12 @@ import org.json.JSONObject;
 import java.io.IOException;
 import java.util.ArrayList;
 
+import javax.inject.Inject;
+
 import butterknife.BindView;
 import butterknife.ButterKnife;
 import butterknife.OnClick;
+import dagger.android.AndroidInjection;
 import retrofit2.Call;
 import retrofit2.Callback;
 import retrofit2.Response;
@@ -52,12 +58,16 @@ public class SubCategoryActivity extends BaseActivity {
      **/
     private String category_id, category_name, access_token;
     private LoginSessionManager sessionManager;
+    SubCategoryViewModel subCategoryViewModel;
+    @Inject
+    SubCategoryFactory subCategoryFactory;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_sub_catgory);
         ButterKnife.bind(this);
+        AndroidInjection.inject(this);
         sessionManager = new LoginSessionManager(this);
         access_token = sessionManager.getUserDetails().get(LoginSessionManager.KEY_Accesstoken);
         if (getIntent().getExtras() != null) {
@@ -74,64 +84,42 @@ public class SubCategoryActivity extends BaseActivity {
     }
 
     private void callSubCategoryApi() {
-        Api api = ApiClient.getClient().create(Api.class);
         JsonObject body = new JsonObject();
         body.addProperty(ApiConstants.CATEGORY_ID, category_id);
-        showProgressDialog(this);
+        subCategoryViewModel = new ViewModelProvider(this, subCategoryFactory).get(SubCategoryViewModel.class);
+        subCategoryViewModel.callSubCategoryApi(access_token, body);
+        subCategoryViewModel.getSubcategoryList().observe(this, this::processSubCategoryList);
+    }
 
-        Call<ServerResponse<SubCategoryPojo>> call = api.postSubCategoryList(access_token, body);
-        call.enqueue(new Callback<ServerResponse<SubCategoryPojo>>() {
-            @Override
-            public void onResponse(Call<ServerResponse<SubCategoryPojo>> call, Response<ServerResponse<SubCategoryPojo>> response) {
+    private void processSubCategoryList(ServerResponse<SubCategoryPojo> response) {
+        switch (response.statusType) {
+            case LOADING:
+                showProgressDialog(this);
+                break;
+            case SUCCESS:
                 dismissProgressDialog();
-                if (response.isSuccessful()) {
-                    if (response.body().isStatus()) {
-                        ArrayList<SubCategoryPojo.Subcategory> subCategoryPojos = new ArrayList<SubCategoryPojo.Subcategory>();
-                        if (response.body().getData() != null) {
-                            subCategoryPojos = response.body().getData().getSubcategory();
-                            if (subCategoryPojos.size() > 0) {
-                                initialiseRecycler(subCategoryPojos);
-                            } else {
-                                tvNodata.setVisibility(View.VISIBLE);
-                            }
-                            if (response.body().getData().getCategoryName() != null) {
-                                toolbarTitle.setText(response.body().getData().getCategoryName());
-                            } else {
-                                toolbarTitle.setText(category_name);
-                            }
-                        } else {
-                            tvNodata.setVisibility(View.VISIBLE);
-                        }
-
-
+                ArrayList<SubCategoryPojo.Subcategory> subCategoryPojos = new ArrayList<SubCategoryPojo.Subcategory>();
+                if (response.getData() != null) {
+                    subCategoryPojos = response.getData().getSubcategory();
+                    if (subCategoryPojos.size() > 0) {
+                        initialiseRecycler(subCategoryPojos);
                     } else {
-                        showToast(getApplicationContext(), response.body().getStatusMessage());
+                        tvNodata.setVisibility(View.VISIBLE);
                     }
-
+                    if (response.getData().getCategoryName() != null) {
+                        toolbarTitle.setText(response.getData().getCategoryName());
+                    } else {
+                        toolbarTitle.setText(category_name);
+                    }
                 } else {
-                    try {
-                        String error_message = response.errorBody().string();
-                        JSONObject jObjError = new JSONObject(error_message);
-                        showToast(getApplicationContext(), jObjError.getString("message"));
-
-                    } catch (JSONException e) {
-                        e.printStackTrace();
-                        showToast(getApplicationContext(), getResources().getString(R.string.something_wrong));
-
-                    } catch (IOException e) {
-                        e.printStackTrace();
-
-                    }
-
+                    tvNodata.setVisibility(View.VISIBLE);
                 }
-            }
-
-            @Override
-            public void onFailure(Call<ServerResponse<SubCategoryPojo>> call, Throwable t) {
+                break;
+            case ERROR:
                 dismissProgressDialog();
-                showToast(getApplicationContext(), t.toString());
-            }
-        });
+                showToast(getApplicationContext(), response.getStatusMessage().toLowerCase());
+
+        }
     }
 
     private void initialiseRecycler(ArrayList<SubCategoryPojo.Subcategory> subCategoryPojos) {

@@ -1,5 +1,6 @@
 package com.example.uploadimages.activities;
 
+import androidx.lifecycle.ViewModelProvider;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import androidx.recyclerview.widget.StaggeredGridLayoutManager;
@@ -14,6 +15,8 @@ import com.example.uploadimages.adapter.CategoryAdapter;
 import com.example.uploadimages.networkUtils.Api;
 import com.example.uploadimages.networkUtils.ApiClient;
 import com.example.uploadimages.networkUtils.ServerResponse;
+import com.example.uploadimages.networkUtils.factories.CategoryFactory;
+import com.example.uploadimages.networkUtils.viewmodel.CategoryViewModel;
 import com.example.uploadimages.responsepojo.CategoryPojo;
 import com.example.uploadimages.sessionManager.LoginSessionManager;
 
@@ -23,14 +26,19 @@ import org.json.JSONObject;
 import java.io.IOException;
 import java.util.ArrayList;
 
+import javax.inject.Inject;
+
 import butterknife.BindView;
 import butterknife.ButterKnife;
+import dagger.android.AndroidInjection;
 import retrofit2.Call;
 import retrofit2.Callback;
 import retrofit2.Response;
 
 public class CategoryActivity extends BaseActivity {
-    /** ButterKnife Code **/
+    /**
+     * ButterKnife Code
+     **/
     @BindView(R.id.toolbar_top)
     androidx.appcompat.widget.Toolbar toolbarTop;
     @BindView(R.id.toolbar_title)
@@ -39,73 +47,62 @@ public class CategoryActivity extends BaseActivity {
     TextView tvNodata;
     @BindView(R.id.rv_category)
     androidx.recyclerview.widget.RecyclerView rvCategory;
-    /** ButterKnife Code **/
+    /**
+     * ButterKnife Code
+     **/
     private LoginSessionManager sessionManager;
     private String access_token;
     private CategoryAdapter categoryAdapter;
     private RecyclerView.LayoutManager layoutManager;
+    @Inject
+    CategoryFactory categoryFactory;
+    CategoryViewModel categoryViewModel;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_category);
         ButterKnife.bind(this);
+        AndroidInjection.inject(this);
         sessionManager = new LoginSessionManager(this);
         access_token = sessionManager.getUserDetails().get(LoginSessionManager.KEY_Accesstoken);
         callCategoryApi();
     }
 
     private void callCategoryApi() {
-        Api api = ApiClient.getClient().create(Api.class);
-        showProgressDialog(this);
-        Call<ServerResponse<ArrayList<CategoryPojo>>> call = api.postCategoryList(access_token);
-        call.enqueue(new Callback<ServerResponse<ArrayList<CategoryPojo>>>() {
-            @Override
-            public void onResponse(Call<ServerResponse<ArrayList<CategoryPojo>>> call, Response<ServerResponse<ArrayList<CategoryPojo>>> response) {
-                dismissProgressDialog();
-                if (response.isSuccessful()) {
-                    if (response.body().isStatus()) {
-                        ArrayList<CategoryPojo> categoryPojos = new ArrayList<>();
-                        categoryPojos = response.body().getData();
-                        if (categoryPojos.size()>0){
-                            initialiseRecycler(categoryPojos);
-                        }else {
-                            tvNodata.setVisibility(View.VISIBLE);
-                        }
+        categoryViewModel = new ViewModelProvider(this, categoryFactory).get(CategoryViewModel.class);
+        categoryViewModel.callCategoryListApi(access_token);
+        categoryViewModel.getCategoryList().observe(this, this::processCategoryList);
+    }
 
+    private void processCategoryList(ServerResponse<ArrayList<CategoryPojo>> response) {
+        switch (response.statusType) {
+            case LOADING:
+                showProgressDialog(this);
+                break;
+            case SUCCESS:
+                dismissProgressDialog();
+                if (response.getData() != null) {
+                    ArrayList<CategoryPojo> categoryPojos = new ArrayList<>();
+                    categoryPojos = response.getData();
+                    if (categoryPojos.size() > 0) {
+                        initialiseRecycler(categoryPojos);
                     } else {
-                        showToast(getApplicationContext(), response.body().getStatusMessage());
+                        tvNodata.setVisibility(View.VISIBLE);
                     }
-
-                } else {
-                    try {
-                        String error_message = response.errorBody().string();
-                        JSONObject jObjError = new JSONObject(error_message);
-                        showToast(getApplicationContext(), jObjError.getString("message"));
-
-                    } catch (JSONException e) {
-                        e.printStackTrace();
-                        showToast(getApplicationContext(), getResources().getString(R.string.something_wrong));
-
-                    } catch (IOException e) {
-                        e.printStackTrace();
-
-                    }
-
                 }
-            }
-
-            @Override
-            public void onFailure(Call<ServerResponse<ArrayList<CategoryPojo>>> call, Throwable t) {
+                break;
+            case ERROR:
                 dismissProgressDialog();
-                showToast(getApplicationContext(), t.toString());
-            }
-        });
+                showToast(getApplicationContext(),response.getStatusMessage());
+
+        }
     }
 
     private void initialiseRecycler(ArrayList<CategoryPojo> categoryPojos) {
         StaggeredGridLayoutManager staggeredGridLayoutManager = new StaggeredGridLayoutManager(2, LinearLayoutManager.VERTICAL);
         rvCategory.setLayoutManager(staggeredGridLayoutManager);
-        categoryAdapter = new CategoryAdapter(this,categoryPojos);
+        categoryAdapter = new CategoryAdapter(this, categoryPojos);
         rvCategory.setAdapter(categoryAdapter);
 
     }

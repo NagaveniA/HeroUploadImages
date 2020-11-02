@@ -3,7 +3,7 @@ package com.example.uploadimages.activities;
 import androidx.annotation.Nullable;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
-import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.lifecycle.ViewModelProvider;
 import androidx.recyclerview.widget.StaggeredGridLayoutManager;
 
 import android.app.Activity;
@@ -11,7 +11,6 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.location.Location;
-import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
 import android.provider.MediaStore;
@@ -24,13 +23,13 @@ import android.widget.TextView;
 
 import com.example.uploadimages.BaseActivity;
 import com.example.uploadimages.R;
-import com.example.uploadimages.adapter.CategoryAdapter;
 import com.example.uploadimages.adapter.UploadmageAdapter;
 import com.example.uploadimages.networkUtils.Api;
 import com.example.uploadimages.networkUtils.ApiClient;
 import com.example.uploadimages.networkUtils.ApiConstants;
 import com.example.uploadimages.networkUtils.ServerResponse;
-import com.example.uploadimages.responsepojo.CategoryPojo;
+import com.example.uploadimages.networkUtils.factories.ImageUploadFactory;
+import com.example.uploadimages.networkUtils.viewmodel.ImageUploadViewModel;
 import com.example.uploadimages.responsepojo.UploadimagePojo;
 import com.example.uploadimages.sessionManager.LoginSessionManager;
 import com.example.uploadimages.utils.AppConstants;
@@ -43,16 +42,15 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.text.DateFormat;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
-import java.util.Date;
+
+import javax.inject.Inject;
 
 import butterknife.BindView;
 import butterknife.ButterKnife;
 import butterknife.OnClick;
-import butterknife.internal.Utils;
+import dagger.android.AndroidInjection;
 import retrofit2.Call;
 import retrofit2.Callback;
 import retrofit2.Response;
@@ -89,12 +87,17 @@ public class UploadImageActivity extends BaseActivity {
     private File path;
     private File savedPhoto;
     FileOutputStream outputStream;
+    @Inject
+    ImageUploadFactory imageUploadFactory;
+
+    ImageUploadViewModel imageUploadViewModel;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_upload_image);
         ButterKnife.bind(this);
+        AndroidInjection.inject(this);
         sessionManager = new LoginSessionManager(this);
         access_token = sessionManager.getUserDetails().get(LoginSessionManager.KEY_Accesstoken);
         if (getIntent().getExtras() != null) {
@@ -112,6 +115,32 @@ public class UploadImageActivity extends BaseActivity {
         }
         init();
         callUploadImageApi(img);
+    }
+
+    private void processImageUploadData(ServerResponse<ArrayList<UploadimagePojo>> response) {
+        switch (response.statusType) {
+            case LOADING:
+                showProgressDialog(this);
+                break;
+            case SUCCESS:
+                dismissProgressDialog();
+                if (response.getData() != null) {
+                    ArrayList<UploadimagePojo> uploadimagePojos = new ArrayList<>();
+                    uploadimagePojos = response.getData();
+                    if (uploadimagePojos.size() > 0) {
+                        llImage.setVisibility(View.GONE);
+                        initialiseRecycler(uploadimagePojos);
+                    } else {
+//                            tvNodata.setVisibility(View.VISIBLE);
+                    }
+                }
+                break;
+            case ERROR:
+                dismissProgressDialog();
+                showToast(getApplicationContext(), response.getStatusMessage().toLowerCase());
+
+
+        }
     }
 
     @OnClick({R.id.fab, R.id.ic_back, R.id.btn_up_load})
@@ -207,64 +236,21 @@ public class UploadImageActivity extends BaseActivity {
     }
 
     private void callUploadImageApi(String img) {
-        Api api = ApiClient.getClient().create(Api.class);
-        showProgressDialog(this);
         JsonObject body = new JsonObject();
         body.addProperty(ApiConstants.LATITUDE, latitude);
         body.addProperty(ApiConstants.LONGITUDE, longitude);
         body.addProperty(ApiConstants.CATEGORY_ID, category_id);
         body.addProperty(ApiConstants.SUBCATEGORY_ID, subcategory_id);
         body.addProperty(ApiConstants.IMAGE, img);
-        Call<ServerResponse<ArrayList<UploadimagePojo>>> call = api.postUploadImage(access_token, body);
-        call.enqueue(new Callback<ServerResponse<ArrayList<UploadimagePojo>>>() {
-            @Override
-            public void onResponse(Call<ServerResponse<ArrayList<UploadimagePojo>>> call, Response<ServerResponse<ArrayList<UploadimagePojo>>> response) {
-                dismissProgressDialog();
-                if (response.isSuccessful()) {
-                    if (response.body().isStatus()) {
-                        ArrayList<UploadimagePojo> uploadimagePojos = new ArrayList<>();
-                        uploadimagePojos = response.body().getData();
-                        if (uploadimagePojos.size() > 0) {
-                            llImage.setVisibility(View.GONE);
-                            initialiseRecycler(uploadimagePojos);
-                        } else {
-//                            tvNodata.setVisibility(View.VISIBLE);
-                        }
-
-                    } else {
-                        showToast(getApplicationContext(), response.body().getStatusMessage());
-                    }
-
-                } else {
-                    try {
-                        String error_message = response.errorBody().string();
-                        JSONObject jObjError = new JSONObject(error_message);
-                        showToast(getApplicationContext(), jObjError.getString("message"));
-
-                    } catch (JSONException e) {
-                        e.printStackTrace();
-                        showToast(getApplicationContext(), getResources().getString(R.string.something_wrong));
-
-                    } catch (IOException e) {
-                        e.printStackTrace();
-
-                    }
-
-                }
-            }
-
-            @Override
-            public void onFailure(Call<ServerResponse<ArrayList<UploadimagePojo>>> call, Throwable t) {
-                dismissProgressDialog();
-                showToast(getApplicationContext(), t.toString());
-            }
-        });
+        imageUploadViewModel = new ViewModelProvider(this, imageUploadFactory).get(ImageUploadViewModel.class);
+        imageUploadViewModel.callUploadImageApi(access_token, body);
+        imageUploadViewModel.getImageUploadData().observe(this, this::processImageUploadData);
     }
 
-    private void initialiseRecycler(ArrayList<UploadimagePojo> uploadimagePojos) {
+    private void initialiseRecycler(ArrayList<UploadimagePojo> uploadImagePojos) {
         StaggeredGridLayoutManager staggeredGridLayoutManager = new StaggeredGridLayoutManager(3, StaggeredGridLayoutManager.VERTICAL); // (int spanCount, int orientation)
         rvImages.setLayoutManager(staggeredGridLayoutManager);
-        UploadmageAdapter uploadmageAdapter = new UploadmageAdapter(this, uploadimagePojos);
+        UploadmageAdapter uploadmageAdapter = new UploadmageAdapter(this, uploadImagePojos);
         rvImages.setAdapter(uploadmageAdapter);
     }
 }

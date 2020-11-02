@@ -13,27 +13,24 @@ import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.TextView;
 
+import androidx.lifecycle.ViewModelProvider;
+
 import com.example.uploadimages.BaseActivity;
 import com.example.uploadimages.R;
-import com.example.uploadimages.networkUtils.Api;
-import com.example.uploadimages.networkUtils.ApiClient;
 import com.example.uploadimages.networkUtils.ApiConstants;
 import com.example.uploadimages.networkUtils.ServerResponse;
+import com.example.uploadimages.networkUtils.factories.SignInFactory;
+import com.example.uploadimages.networkUtils.viewmodel.SignInViewModel;
 import com.example.uploadimages.responsepojo.LoginPojo;
 import com.example.uploadimages.sessionManager.LoginSessionManager;
 import com.google.gson.JsonObject;
 
-import org.json.JSONException;
-import org.json.JSONObject;
-
-import java.io.IOException;
+import javax.inject.Inject;
 
 import butterknife.BindView;
 import butterknife.ButterKnife;
 import butterknife.OnClick;
-import retrofit2.Call;
-import retrofit2.Callback;
-import retrofit2.Response;
+import dagger.android.AndroidInjection;
 
 public class LoginActivity extends BaseActivity {
     /**
@@ -63,11 +60,17 @@ public class LoginActivity extends BaseActivity {
     boolean isPasswordVisible = false;
     private LoginSessionManager sessionManager;
 
+    SignInViewModel signInViewModel;
+    @Inject
+    SignInFactory signInFactory;
+
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_login);
         ButterKnife.bind(this);
+        AndroidInjection.inject(this);
         sessionManager = new LoginSessionManager(getApplicationContext());
         if (sessionManager.isUserLoggedIn()) {
             startActivity(new Intent(this, CategoryActivity.class));
@@ -106,10 +109,6 @@ public class LoginActivity extends BaseActivity {
     @OnClick({R.id.iv_hide, R.id.btn_login})
     public void OnClick(View view) {
         switch (view.getId()) {
-//            case R.id.tv_forgot_pass:
-//                Intent intent = new Intent(this, ForgotPasswordActivity.class);
-//                startActivity(intent);
-//                break;
             case R.id.iv_hide:
                 if (!isPasswordVisible) {
                     etPassword.setTransformationMethod(HideReturnsTransformationMethod.getInstance());
@@ -141,59 +140,36 @@ public class LoginActivity extends BaseActivity {
     }
 
     private void callApi() {
-        Api api = ApiClient.getClient().create(Api.class);
-        showProgressDialog(this);
         JsonObject body = new JsonObject();
         body.addProperty(ApiConstants.EMAIL, etName.getText().toString());
         body.addProperty(ApiConstants.PASSWORD, etPassword.getText().toString());
-        Call<ServerResponse<LoginPojo>> call = api.postsignin(body);
-        call.enqueue(new Callback<ServerResponse<LoginPojo>>() {
-            @Override
-            public void onResponse(Call<ServerResponse<LoginPojo>> call, Response<ServerResponse<LoginPojo>> response) {
-                dismissProgressDialog();
-                if (response.isSuccessful()) {
-                    assert response.body() != null;
-                    if (response.body().isStatus()) {
-                        LoginPojo loginBean = response.body().getData();
-                        Intent i;
-                        sessionManager.createUserSession(loginBean);
-                        i = new Intent(LoginActivity.this, CategoryActivity.class);
-                        i.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
-                        i.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                        i.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK);
-                        startActivity(i);
-                        finish();
-                    } else {
-                        showToast(getApplicationContext(), response.body().getStatusMessage());
-                    }
-
-                } else {
-                    try {
-                        String error_message = response.errorBody().string();
-                        JSONObject jObjError = new JSONObject(error_message);
-                        showToast(getApplicationContext(), jObjError.getString("message"));
-
-                    } catch (JSONException e) {
-                        e.printStackTrace();
-                        showToast(getApplicationContext(), getResources().getString(R.string.something_wrong));
-
-                    } catch (IOException e) {
-                        e.printStackTrace();
-
-                    }
-
-                }
-            }
-
-
-            @Override
-            public void onFailure(Call<ServerResponse<LoginPojo>> call, Throwable t) {
-                dismissProgressDialog();
-                showToast(getApplicationContext(), t.toString());
-
-            }
-        });
-
+        signInViewModel = new ViewModelProvider(this, signInFactory).get(SignInViewModel.class);
+        signInViewModel.callLoginApi(body);
+        signInViewModel.getLoginData().observe(this, this::processSignInApi);
     }
 
+    private void processSignInApi(ServerResponse<LoginPojo> response) {
+        switch (response.statusType) {
+            case LOADING:
+                showProgressDialog(this);
+                break;
+            case SUCCESS:
+                dismissProgressDialog();
+                if (response.getData() != null) {
+                    LoginPojo loginBean = response.getData();
+                    Intent i;
+                    sessionManager.createUserSession(loginBean);
+                    i = new Intent(LoginActivity.this, CategoryActivity.class);
+                    i.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                    i.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    i.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                    startActivity(i);
+                    finish();
+                }
+                break;
+            case ERROR:
+                dismissProgressDialog();
+                showToast(getApplicationContext(), response.getStatusMessage().toLowerCase());
+        }
+    }
 }
